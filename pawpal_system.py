@@ -5,8 +5,7 @@ All backend classes live here. UI and tests import from this module.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 
 
 # ---------------------------------------------------------------------------
@@ -93,19 +92,20 @@ class Schedule:
 
 
 class Scheduler:
-    def __init__(self, owner: Owner, pet: Pet, tasks: list[Task]) -> None:
+    def __init__(self, owner: Owner, pet: Pet) -> None:
         self.owner = owner
         self.pet = pet
-        self.tasks = tasks
+        self.last_schedule: Schedule | None = None  # set by generate_schedule()
 
     def generate_schedule(self, date: str) -> Schedule:
         """
         Build and return a Schedule for the given date.
-        Selects tasks that fit within the owner's available time,
-        ordered by priority.
+        Reads tasks from self.owner.tasks, selects those that fit within
+        the owner's available time ordered by priority, and stores the
+        result in self.last_schedule before returning it.
         """
         pass
 
     def explain_plan(self) -> str:
-        """Return a plain-language explanation of how the schedule was built."""
+        """Return a plain-language explanation of how self.last_schedule was built."""
         pass
