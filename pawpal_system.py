@@ -6,6 +6,7 @@ All backend classes live here. UI and tests import from this module.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 
 
 # ---------------------------------------------------------------------------
@@ -21,6 +22,9 @@ class Task:
     notes: str = ""
     completed: bool = False
     pet_name: str = ""          # set automatically by Pet.add_task()
+    start_time: str = ""        # "HH:MM", assigned by Scheduler
+    recurrence: str = "none"    # "none", "daily", or "weekly"
+    due_date: str = ""          # "YYYY-MM-DD", used by recurring tasks
 
     def mark_complete(self) -> None:
         """Mark this task as done."""
@@ -91,6 +95,54 @@ class Owner:
         self.preferences = preferences
 
 
+# ---------------------------------------------------------------------------
+# Module-level algorithmic helpers
+# ---------------------------------------------------------------------------
+
+def _time_str_to_minutes(t: str) -> int:
+    """Convert 'HH:MM' to total minutes since midnight."""
+    h, m = map(int, t.split(":"))
+    return h * 60 + m
+
+
+def sort_tasks_by_time(tasks: list[Task]) -> list[Task]:
+    """Return tasks sorted by start_time ascending; tasks with no time go last."""
+    return sorted(tasks, key=lambda t: t.start_time if t.start_time else "99:99")
+
+
+def filter_tasks(
+    tasks: list[Task],
+    *,
+    completed: bool | None = None,
+    pet_name: str | None = None,
+) -> list[Task]:
+    """Return tasks matching all supplied filters; omit a filter to skip it."""
+    result = tasks
+    if completed is not None:
+        result = [t for t in result if t.completed == completed]
+    if pet_name is not None:
+        result = [t for t in result if t.pet_name == pet_name]
+    return result
+
+
+def spawn_next_occurrence(task: Task, from_date: str) -> Task | None:
+    """Return a fresh Task for the next occurrence of a recurring task, or None if non-recurring."""
+    if task.recurrence == "none":
+        return None
+    delta = timedelta(days=1) if task.recurrence == "daily" else timedelta(weeks=1)
+    next_date = str(date.fromisoformat(from_date) + delta)
+    return Task(
+        name=task.name,
+        category=task.category,
+        duration_minutes=task.duration_minutes,
+        priority=task.priority,
+        notes=task.notes,
+        recurrence=task.recurrence,
+        due_date=next_date,
+        pet_name=task.pet_name,
+    )
+
+
 _PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 
 
@@ -108,10 +160,11 @@ class Schedule:
         lines = [f"Schedule for {self.date}:"]
         for i, task in enumerate(self.selected_tasks, 1):
             status = "[done]" if task.completed else f"{task.duration_minutes} min"
-            pet_label = f"{task.pet_name}: " if task.pet_name else ""
+            pet_label  = f"{task.pet_name}: " if task.pet_name else ""
+            time_label = f" @ {task.start_time}" if task.start_time else ""
             lines.append(
                 f"  {i}. [{task.priority.upper()}] {pet_label}{task.name}"
-                f" ({task.category}) - {status}"
+                f"{time_label} ({task.category}) - {status}"
             )
         lines.append(f"  Total: {self.total_duration_minutes} min")
         return "\n".join(lines)
@@ -132,21 +185,42 @@ class Scheduler:
         """Return all incomplete tasks from the selected pets only."""
         return [t for pet in self.pets for t in pet.tasks if not t.completed]
 
-    def generate_schedule(self, date: str) -> Schedule:
-        """Sort pending tasks by priority, fit as many as possible into the time budget, and store the result."""
+    def generate_schedule(self, date: str, day_start: str = "08:00") -> Schedule:
+        """Sort pending tasks by priority, fit as many as possible into the time budget, assign start times, and store the result."""
         schedule = Schedule(date)
         sorted_tasks = sorted(
             self._pending_tasks(),
             key=lambda t: (_PRIORITY_ORDER.get(t.priority, 99), t.name),
         )
         budget = self.owner.available_minutes
+        current = _time_str_to_minutes(day_start)
         for task in sorted_tasks:
             if task.duration_minutes <= budget:
+                h, m = divmod(current, 60)
+                task.start_time = f"{h:02d}:{m:02d}"
                 schedule.selected_tasks.append(task)
                 schedule.total_duration_minutes += task.duration_minutes
                 budget -= task.duration_minutes
+                current += task.duration_minutes
         self.last_schedule = schedule
         return schedule
+
+    def detect_conflicts(self, schedule: Schedule) -> list[str]:
+        """Check scheduled tasks for overlapping time windows and return a warning string for each conflict found."""
+        warnings: list[str] = []
+        timed = [t for t in schedule.selected_tasks if t.start_time]
+        for i, t1 in enumerate(timed):
+            for t2 in timed[i + 1:]:
+                s1, e1 = _time_str_to_minutes(t1.start_time), _time_str_to_minutes(t1.start_time) + t1.duration_minutes
+                s2, e2 = _time_str_to_minutes(t2.start_time), _time_str_to_minutes(t2.start_time) + t2.duration_minutes
+                if s1 < e2 and s2 < e1:
+                    end1 = f"{e1 // 60:02d}:{e1 % 60:02d}"
+                    end2 = f"{e2 // 60:02d}:{e2 % 60:02d}"
+                    warnings.append(
+                        f"CONFLICT: '{t1.name}' ({t1.start_time}-{end1})"
+                        f" overlaps '{t2.name}' ({t2.start_time}-{end2})"
+                    )
+        return warnings
 
     def explain_plan(self) -> str:
         """Return a plain-language explanation of how self.last_schedule was built."""

@@ -95,8 +95,7 @@ Second, `explain_plan()` had no way to reference the schedule it was meant to ex
 
 **b. Tradeoffs**
 
-- Describe one tradeoff your scheduler makes.
-- Why is that tradeoff reasonable for this scenario?
+The conflict detector checks for exact time-window overlap (does interval A intersect interval B?) rather than softer conflicts like back-to-back tasks that leave no transition time, or tasks that are logistically incompatible (e.g., two long walks in one morning). This O(n²) pairwise check is a deliberate tradeoff: it is simple to read, trivial to test, and fast enough for the scale of a daily pet care schedule (realistically under 20 tasks). Adding transition-time buffers or logical-incompatibility rules would require domain knowledge that the system does not currently collect, so the exact-overlap check gives the most value for the least added complexity.
 
 ---
 
