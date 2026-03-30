@@ -20,6 +20,7 @@ class Task:
     priority: str          # "high", "medium", or "low"
     notes: str = ""
     completed: bool = False
+    pet_name: str = ""          # set automatically by Pet.add_task()
 
     def mark_complete(self) -> None:
         """Mark this task as done."""
@@ -43,7 +44,8 @@ class Pet:
         return f"{self.name} ({self.species}, {self.breed}, {self.age_years}yr)"
 
     def add_task(self, task: Task) -> None:
-        """Attach a care task directly to this pet."""
+        """Attach a care task to this pet and stamp the pet's name on it."""
+        task.pet_name = self.name
         self.tasks.append(task)
 
 
@@ -58,6 +60,7 @@ class Owner:
         available_minutes: int,
         preferences: str = "",
     ) -> None:
+        """Create an owner with a daily time budget and optional preferences."""
         self.name = name
         self.available_minutes = available_minutes
         self.preferences = preferences
@@ -93,6 +96,7 @@ _PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 
 class Schedule:
     def __init__(self, date: str) -> None:
+        """Create an empty schedule for the given date."""
         self.date = date
         self.selected_tasks: list[Task] = []
         self.total_duration_minutes: int = 0
@@ -104,8 +108,9 @@ class Schedule:
         lines = [f"Schedule for {self.date}:"]
         for i, task in enumerate(self.selected_tasks, 1):
             status = "[done]" if task.completed else f"{task.duration_minutes} min"
+            pet_label = f"{task.pet_name}: " if task.pet_name else ""
             lines.append(
-                f"  {i}. [{task.priority.upper()}] {task.name}"
+                f"  {i}. [{task.priority.upper()}] {pet_label}{task.name}"
                 f" ({task.category}) - {status}"
             )
         lines.append(f"  Total: {self.total_duration_minutes} min")
@@ -117,22 +122,21 @@ class Schedule:
 
 
 class Scheduler:
-    def __init__(self, owner: Owner, pet: Pet) -> None:
+    def __init__(self, owner: Owner, pets: list[Pet]) -> None:
+        """Create a scheduler for the given owner and selected list of pets."""
         self.owner = owner
-        self.pet = pet
+        self.pets = pets
         self.last_schedule: Schedule | None = None  # set by generate_schedule()
 
+    def _pending_tasks(self) -> list[Task]:
+        """Return all incomplete tasks from the selected pets only."""
+        return [t for pet in self.pets for t in pet.tasks if not t.completed]
+
     def generate_schedule(self, date: str) -> Schedule:
-        """
-        Build and return a Schedule for the given date.
-        Reads tasks from self.owner.tasks, selects those that fit within
-        the owner's available time ordered by priority, and stores the
-        result in self.last_schedule before returning it.
-        """
+        """Sort pending tasks by priority, fit as many as possible into the time budget, and store the result."""
         schedule = Schedule(date)
-        pending = [t for t in self.owner.get_all_tasks() if not t.completed]
         sorted_tasks = sorted(
-            pending,
+            self._pending_tasks(),
             key=lambda t: (_PRIORITY_ORDER.get(t.priority, 99), t.name),
         )
         budget = self.owner.available_minutes
@@ -154,7 +158,7 @@ class Scheduler:
                 f"No tasks were scheduled for {s.date}. "
                 "Either there are no pending tasks or none fit within the available time."
             )
-        all_pending = [t for t in self.owner.get_all_tasks() if not t.completed]
+        all_pending = self._pending_tasks()
         skipped = [t for t in all_pending if t not in s.selected_tasks]
         lines = [
             f"For {s.date}, {len(s.selected_tasks)} task(s) were chosen "
